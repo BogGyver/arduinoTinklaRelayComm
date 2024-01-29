@@ -6,7 +6,7 @@ bool lineReceived = false;
 bool dataRequested = false;
 String readString; //will have the string here to process
 const unsigned int endOfTransmissionCode = 0;
-const bool ignoreCRandLF = true;
+const bool ignoreCRandLF = false;
 int outputBufferSize = 0;
 
 //TIMERS
