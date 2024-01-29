@@ -27,5 +27,4 @@ The following flags are read from Tinkla Relay
  - bool rel_left_side_bsm
  - bool rel_right_side_bsm
  - bool rel_tacc_only_active
-
-unsigned int rel_brightness = 100; // start brightness value
+ - unsigned int rel_brightness
