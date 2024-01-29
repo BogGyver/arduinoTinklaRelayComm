@@ -246,12 +246,8 @@ void commLoop() {
 
 void loop() {
   commLoop();
-  
   //YOUR CODE STARTS HERE
 
 
   //YOUR CODE ENDS HERE
-
-  //sleep 100ms if possible not to overload RELAY with data requests
-  delay(100);
 }
