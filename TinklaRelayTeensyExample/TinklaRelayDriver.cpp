@@ -6,11 +6,6 @@
 #define TINKLA_RELAY_VID   0xbbaa
 #define TINKLA_RELAY_PID   0xddcc
 
-#define print   USBHost::print_
-#define println USBHost::println_
-
-void showDebugTxt(String dbgTxt);
-
 uint8_t tinklaRelayData[] = {0,0,0,0,0,0,0,0,0,0};
 
 static void pipe_set_addr(Pipe_t *pipe, uint32_t addr)
@@ -28,25 +23,14 @@ void TinklaRelay::init()
 
 bool TinklaRelay::claim(Device_t *dev, int type, const uint8_t *descriptors, uint32_t len)
 {
-  #ifdef DEBUG_USB
-    showDebugTxt("Trying to claim TR");
-    showDebugTxt(String(dev->idVendor, HEX));
-    showDebugTxt(String(dev->idProduct, HEX));
-  #endif
   if (dev->idVendor != TINKLA_RELAY_VID) return false;
 	if (dev->idProduct != TINKLA_RELAY_PID) return false;
   // only claim at interface level
 
 	if (type != 1) {
-    #ifdef DEBUG_USB
-    showDebugTxt("NOT INTERF");
-    #endif
     return false;
   }
 	if (len < 9+7+7+7) { // Interface descriptor + 3 endpoint decriptors
-    #ifdef DEBUG_USB
-      showDebugTxt("WRONG SIZE");
-    #endif
     return false;
   }
 
@@ -58,17 +42,10 @@ bool TinklaRelay::claim(Device_t *dev, int type, const uint8_t *descriptors, uin
 	if (descriptors[7] != 255) return false; 
 
   bInterfaceNumber = descriptors[2];
-  println("interfaceNumber=", bInterfaceNumber, HEX);
-
   uint8_t desc_index = 9;
 	uint8_t in_index = 0xff, out_index = 0xff;
-
-  println("numendpoint=", numendpoint, HEX);
 	while (numendpoint--) {
 		if ((descriptors[desc_index] != 7) || (descriptors[desc_index+1] != 5)) {
-      #ifdef DEBUG_USB
-      showDebugTxt("NOT ENDP");
-      #endif
       return false; // not an end point
     }
     
@@ -82,28 +59,14 @@ bool TinklaRelay::claim(Device_t *dev, int type, const uint8_t *descriptors, uin
 		desc_index += 7;	// point to next one...
 	}
 	if ((in_index == 0xff) || (out_index == 0xff)) {	// did not find end point
-    #ifdef DEBUG_USB
-    showDebugTxt("NO ENDPs");
-    #endif
     return false;
   } 
   uint32_t endpointIn = descriptors[in_index+2]; // bulk-in descriptor 1 81h
 	uint32_t endpointOut = descriptors[out_index+2]; // bulk-out descriptor 2 02h
-
-	println("endpointIn=", endpointIn, HEX);
-	println("endpointOut=", endpointOut, HEX);
-
 	uint32_t sizeIn = descriptors[in_index+4] | (descriptors[in_index+5] << 8);
-	println("packet size in (USBDrive) = ", sizeIn);
-
 	uint32_t sizeOut = descriptors[out_index+4] | (descriptors[out_index+5] << 8);
-	println("packet size out (USBDrive) = ", sizeOut);
-
 	uint32_t intervalIn = descriptors[in_index+6];
 	uint32_t intervalOut = descriptors[out_index+6];
-
-	println("polling intervalIn = ", intervalIn);
-	println("polling intervalOut = ", intervalOut);
 	rxpipe = new_Pipe(dev, 2, endpointIn & 0x0F, 1, sizeIn, intervalIn);
 	txpipe = new_Pipe(dev, 2, endpointOut, 0, sizeOut, intervalOut);
 	rxpipe->callback_function = rx_callback;
@@ -129,16 +92,10 @@ void TinklaRelay::control(const Transfer_t *transfer)
     switch(dataReqType) {
       case GET_TINKLA_RELAY_DATA: //teensy data from TR ,GET_TINKLA_RELAY_DATA_SIZE
         {
-          #ifdef DEBUG_USB
-            showDebugTxt("TR DT: "+ String((char *)transfer->buffer));
-          #endif
           break;
         }
       default:
         {
-          #ifdef DEBUG_USB
-            showDebugTxt("UNKNOWN DATA");
-          #endif
         }
     }
   }
@@ -197,9 +154,6 @@ void TinklaRelay::Task() {
   }
   //check for message timeout
   if (millis() - millisLastMessageEnded >= TIMEOUT_NO_MSG) {
-    #ifdef DEBUG_USB
-      showDebugTxt("MSG TO");
-    #endif
     resetComm();
     resetFlags();
     dataRequested = false;
@@ -247,7 +201,7 @@ void TinklaRelay::resetFlags() {
   rel_right_side_bsm = false;
   rel_tacc_only_active = false;
 
-  rel_brightness = 100;
+  rel_brightness = 50;
   rel_power_lvl = 0;
   rel_speed = 0;
 }
