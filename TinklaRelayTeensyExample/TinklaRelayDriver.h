@@ -14,7 +14,7 @@
 #define REL_HIGHBEAMS_ON 16
 #define REL_LIGHT_ON 32
 #define REL_BELOW_20MPH 64
-#define UNUSED1 128
+#define REL_USE_IMPERIAL_FOR_SPEED 128
 //Third Byte After DATA
 #define REL_LEFT_STEERING_ANGLE_ABOVE_45DEG 2
 #define REL_RIGHT_STEERING_ANGLE_ABOVE_45DEG 4
@@ -25,7 +25,8 @@
 #define REL_TACC_ONLY_ACTIVE 128
 
 //CONTROL READ VALUES
-#define GET_TINKLA_RELAY_SERIAL_NUMBER 0xD0
+#define GET_TINKLA_RELAY_DATA 0xFE
+#define GET_TINKLA_RELAY_DATA_SIZE 0x0a
 
 class TinklaRelay: public USBDriver {
 public:
@@ -52,17 +53,21 @@ public:
     volatile bool rel_left_side_bsm = false;
     volatile bool rel_right_side_bsm = false;
     volatile bool rel_tacc_only_active = false;
-    volatile unsigned int rel_brightness = 100; // start brightness value
+    volatile bool rel_use_imperial = false; //imperial vs metric for speed
+    volatile uint8_t rel_brightness = 100; // start brightness value
+    volatile uint8_t rel_speed = 0; //starting speed, speed is in the UoM set on car
+    volatile int16_t rel_power_lvl = 0; 
 protected:
     virtual void Task();
     virtual bool claim(Device_t *device, int type, const uint8_t *descriptors, uint32_t len);
     virtual void disconnect();
-private:
+    virtual void control(const Transfer_t *transfer);
     static void rx_callback(const Transfer_t *transfer);
     static void tx_callback(const Transfer_t *transfer);
     void rx_data(const Transfer_t *transfer);
     void tx_data(const Transfer_t *transfer);
     void init();
+private:
     size_t write(const void *data, const size_t size);
     int read(void *data, const size_t size);
     
@@ -82,6 +87,7 @@ private:
     volatile uint8_t  rxlen;
     volatile bool     do_polling;  
     setup_t setup;
+    bool tinklaRelayInitialized = false;
 
     //COMM VARIABLES
     bool readingLine = false;
@@ -98,12 +104,12 @@ private:
     const unsigned int TIMEOUT_MSG = 100; // 0.1s to get the response
     const unsigned int TIMEOUT_NO_MSG = 3000; // 3s max between messages
     const unsigned int TIME_BEFORE_NEXT_DATA_RELAY = 200; //0.2s before asking for next data packet 
-    void requestDataMessage(uint8_t dataReq);
-    void processDataMessage(String dataMessage);
-    void processBrightnessMessage(String dataMessage);
+    void requestDataMessage(uint8_t dataReq, uint8_t dataLen, void *buf);
+    void processDataMessage();
     void messageReceived();
     void messageStart();
     void resetComm();
     void resetFlags();
-    void control(const Transfer_t *transfer);
+    Device_t *myDev;
+    uint8_t bInterfaceNumber = 0;
 };

@@ -1,37 +1,22 @@
-/* USB EHCI Host for Teensy 3.6
- * Copyright 2017 Michael McElligott
- * Copyright 2017 Paul Stoffregen (paul@pjrc.com)
- *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the
- * "Software"), to deal in the Software without restriction, including
- * without limitation the rights to use, copy, modify, merge, publish,
- * distribute, sublicense, and/or sell copies of the Software, and to
- * permit persons to whom the Software is furnished to do so, subject to
- * the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
- * IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
- * CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
- * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
- * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
- */
-
 #define DEBUG_USB
 
-#include <Arduino.h>
-#include "USBHost_t36.h"  // Read this header first for key info
+#include "USBHost_t36.h" 
 #include "TinklaRelayDriver.h"
 
 #define TINKLA_RELAY_VID   0xbbaa
 #define TINKLA_RELAY_PID   0xddcc
 
+#define print   USBHost::print_
+#define println USBHost::println_
+
 void showDebugTxt(String dbgTxt);
+
+uint8_t tinklaRelayData[] = {0,0,0,0,0,0,0,0,0,0};
+
+static void pipe_set_addr(Pipe_t *pipe, uint32_t addr)
+{
+	pipe->qh.capabilities[0] = (pipe->qh.capabilities[0] & 0xFFFFFF80) | addr;
+}
 
 void TinklaRelay::init()
 {
@@ -45,37 +30,109 @@ bool TinklaRelay::claim(Device_t *dev, int type, const uint8_t *descriptors, uin
 {
   #ifdef DEBUG_USB
     showDebugTxt("Trying to claim TR");
-    showDebugTxt(String(dev->idVendor));
-    showDebugTxt(String(dev->idProduct));
+    showDebugTxt(String(dev->idVendor, HEX));
+    showDebugTxt(String(dev->idProduct, HEX));
   #endif
   if (dev->idVendor != TINKLA_RELAY_VID) return false;
 	if (dev->idProduct != TINKLA_RELAY_PID) return false;
-	rxpipe = txpipe = NULL;
+  // only claim at interface level
+
+	if (type != 1) {
+    #ifdef DEBUG_USB
+    showDebugTxt("NOT INTERF");
+    #endif
+    return false;
+  }
+	if (len < 9+7+7+7) { // Interface descriptor + 3 endpoint decriptors
+    #ifdef DEBUG_USB
+      showDebugTxt("WRONG SIZE");
+    #endif
+    return false;
+  }
+
+  //Few more TR specific checks
+  uint32_t numendpoint = descriptors[4];
+	if (numendpoint < 1) return false; 
+	if (descriptors[5] != 255) return false; 
+	if (descriptors[6] != 255) return false; 
+	if (descriptors[7] != 255) return false; 
+
+  bInterfaceNumber = descriptors[2];
+  println("interfaceNumber=", bInterfaceNumber, HEX);
+
+  uint8_t desc_index = 9;
+	uint8_t in_index = 0xff, out_index = 0xff;
+
+  println("numendpoint=", numendpoint, HEX);
+	while (numendpoint--) {
+		if ((descriptors[desc_index] != 7) || (descriptors[desc_index+1] != 5)) {
+      #ifdef DEBUG_USB
+      showDebugTxt("NOT ENDP");
+      #endif
+      return false; // not an end point
+    }
+    
+    //if (descriptors[desc_index] != 4) return false; // not an end point
+		if (descriptors[desc_index+3] == 2) {  // Bulk end point
+			if (descriptors[desc_index+2] & 0x80)
+				in_index = desc_index;
+			else
+				out_index = desc_index;
+		}
+		desc_index += 7;	// point to next one...
+	}
+	if ((in_index == 0xff) || (out_index == 0xff)) {	// did not find end point
+    #ifdef DEBUG_USB
+    showDebugTxt("NO ENDPs");
+    #endif
+    return false;
+  } 
+  uint32_t endpointIn = descriptors[in_index+2]; // bulk-in descriptor 1 81h
+	uint32_t endpointOut = descriptors[out_index+2]; // bulk-out descriptor 2 02h
+
+	println("endpointIn=", endpointIn, HEX);
+	println("endpointOut=", endpointOut, HEX);
+
+	uint32_t sizeIn = descriptors[in_index+4] | (descriptors[in_index+5] << 8);
+	println("packet size in (USBDrive) = ", sizeIn);
+
+	uint32_t sizeOut = descriptors[out_index+4] | (descriptors[out_index+5] << 8);
+	println("packet size out (USBDrive) = ", sizeOut);
+
+	uint32_t intervalIn = descriptors[in_index+6];
+	uint32_t intervalOut = descriptors[out_index+6];
+
+	println("polling intervalIn = ", intervalIn);
+	println("polling intervalOut = ", intervalOut);
+	rxpipe = new_Pipe(dev, 2, endpointIn & 0x0F, 1, sizeIn, intervalIn);
+	txpipe = new_Pipe(dev, 2, endpointOut, 0, sizeOut, intervalOut);
+	rxpipe->callback_function = rx_callback;
+	txpipe->callback_function = tx_callback;
+  millisLastMessageEnded = millis() + 5000; //wait 3 sconds before asking for data
+  millisMessageStarted = millis() + 5000;
+  tinklaRelayInitialized = true;
+  device = dev;
   return true;
 }
 
 void TinklaRelay::disconnect()
 {
 	updatetimer.stop();
-	//txtimer.stop();
 }
 
 void TinklaRelay::control(const Transfer_t *transfer)
 {
   if (!dataRequested) {
     //we are here but we did not request data
-    #ifdef DEBUG_USB
-      showDebugTxt("In CTRL w/o req");
-    #endif
     return;
   } else {
     switch(dataReqType) {
-      case GET_TINKLA_RELAY_SERIAL_NUMBER:
+      case GET_TINKLA_RELAY_DATA: //teensy data from TR ,GET_TINKLA_RELAY_DATA_SIZE
         {
           #ifdef DEBUG_USB
-            char *relay_serial_number = (char *)transfer->buffer;
-            showDebugTxt("RX SN:" + String(relay_serial_number).substring(0,5));
+            showDebugTxt("TR DT: "+ String((char *)transfer->buffer));
           #endif
+          break;
         }
       default:
         {
@@ -91,30 +148,24 @@ void TinklaRelay::control(const Transfer_t *transfer)
 
 void TinklaRelay::rx_callback(const Transfer_t *transfer)
 {
-  #ifdef DEBUG_USB
-  showDebugTxt("In rx_callback!");
-  #endif
 	if (!transfer->driver) return;
 	((TinklaRelay *)(transfer->driver))->rx_data(transfer);
 }
 
 void TinklaRelay::tx_callback(const Transfer_t *transfer)
 {
-  #ifdef DEBUG_USB
-  showDebugTxt("In rx_callback!");
-  #endif
   if (!transfer->driver) return;
   ((TinklaRelay *)(transfer->driver))->tx_data(transfer);
 }
 
 void TinklaRelay::rx_data(const Transfer_t *transfer)
 {
-  
+  rxlen = 0;
 }
 
 void TinklaRelay::tx_data(const Transfer_t *transfer)
 {
-
+  //txlen = 0;
 }
 
 
@@ -123,70 +174,30 @@ size_t TinklaRelay::write(const void *data, const size_t size)
 	return 0;
 }
 
-void TinklaRelay::requestDataMessage(uint8_t dataReq) {
+void TinklaRelay::requestDataMessage(uint8_t dataReq, uint8_t dataLen, void *buf) {
+  if (millis() < 5000) {
+    //do nothing the first 5 seconds
+    return;
+  }
   if ((millis() - millisLastMessageEnded >= TIME_BEFORE_NEXT_DATA_RELAY) && (!dataRequested)){
-    //dest, request_type, requst, value, index, length
-    mk_setup(setup, 192, dataReq, 0, 0, 0x20);
-    queue_Control_Transfer(device, &setup, NULL, this);
+    mk_setup(setup, 0x80, dataReq, 0, 0, dataLen);
     dataRequested = true;
     dataReqType = dataReq;
-    #ifdef DEBUG
-    showDebugTxt("RQ Data " + String(dataReq));
-    #endif
+    pipe_set_addr(device->control_pipe, device->address);
+    queue_Control_Transfer(device, &setup, buf, this);
     messageStart();
   }
 }
 
 
-void TinklaRelay::Task()
-{
-	
-  // if (Serial.available()) {
-  //   messageStart();
-  // }
-  // while (readingLine) {
-  //   if (millis() - millisMessageStarted >= TIMEOUT_MSG) {
-  //     #ifdef DEBUG
-  //       if (readString.length() > 0) {
-  //         showDebugTxt("CHR TO");
-  //       }
-  //     #endif
-  //     resetComm();
-  //   }
-  //   if (Serial.available() >0) {
-  //     char c = Serial.read();  //gets one byte from serial buffer
-  //     if (c == endOfTransmissionCode) {
-  //       messageReceived();
-  //     } else {
-  //       if (!(ignoreCRandLF && (( c == 10) || ( c == 13)))) {
-  //         readString += c; //makes the string readString
-  //       }
-  //       millisMessageStarted = millis();
-  //     }
-  //   } 
-  // }
-  
-  // // process data only when you receive data
-  // if (lineReceived) {
-  //   #ifdef DEBUG
-  //   showDebugTxt(readString.substring(0,7));
-  //   #endif
-  //   //is DATA message valid?
-  //   if ((readString.length() == 7) && (readString.indexOf("DATA") == 0)) {
-  //     processDataMessage(readString);
-  //     dataRequested = false;
-  //   }
-  //   //is BRGT message valid?
-  //   if ((readString.length() == 5) && (readString.indexOf("BRGT") == 0)) {
-  //     processBrightnessMessage(readString);
-  //   }
-  //   //done with message
-  //   resetComm();
-  // }
-  
+void TinklaRelay::Task() {
+  if (millis() < 5000) {
+    //do nothing the first 5 seconds
+    return;
+  }
   //check for message timeout
   if (millis() - millisLastMessageEnded >= TIMEOUT_NO_MSG) {
-    #ifdef DEBUG
+    #ifdef DEBUG_USB
       showDebugTxt("MSG TO");
     #endif
     resetComm();
@@ -196,15 +207,17 @@ void TinklaRelay::Task()
 
   //request data if not requested
   if (!dataRequested) {
-    requestDataMessage(GET_TINKLA_RELAY_SERIAL_NUMBER);
+    requestDataMessage(GET_TINKLA_RELAY_DATA,GET_TINKLA_RELAY_DATA_SIZE,&tinklaRelayData);
   }
 }
 
 //NOW THE COMM PART
 
 void TinklaRelay::resetComm() {
-  millisMessageStarted = 0;
-  millisLastMessageEnded = millis();
+  if (tinklaRelayInitialized) {
+    millisMessageStarted = millis();
+    millisLastMessageEnded = millis();
+  }
   dataRequested = false;
   dataReqType = 0;
 }
@@ -224,6 +237,7 @@ void TinklaRelay::resetFlags() {
   rel_highbeams_on = false;
   rel_light_on = false;
   rel_below_20mph = false; 
+  rel_use_imperial = false;
 
   rel_left_steering_above_45deg = false; 
   rel_right_steering_above_45deg = false;
@@ -232,6 +246,10 @@ void TinklaRelay::resetFlags() {
   rel_left_side_bsm = false;
   rel_right_side_bsm = false;
   rel_tacc_only_active = false;
+
+  rel_brightness = 100;
+  rel_power_lvl = 0;
+  rel_speed = 0;
 }
 
 void TinklaRelay::messageStart() {
@@ -242,50 +260,33 @@ void TinklaRelay::messageReceived() {
   dataRequested = false;
   dataReqType = 0;
   millisLastMessageEnded = millis();
+  processDataMessage();
 }
 
+void TinklaRelay::processDataMessage() {
+  rel_option1_on = ((tinklaRelayData[0] & REL_OPTION1_ON) > 0);
+  rel_option2_on = ((tinklaRelayData[0] & REL_OPTION2_ON) > 0);
+  rel_option3_on = ((tinklaRelayData[0] & REL_OPTION3_ON) > 0);
+  rel_option4_on = ((tinklaRelayData[0] & REL_OPTION4_ON) > 0);
+  rel_car_on = ((tinklaRelayData[0] & REL_CAR_ON) > 0);
+  rel_gear_in_reverse = ((tinklaRelayData[0] & REL_GEAR_IN_REVERSE) > 0);
+  rel_gear_in_forward = ((tinklaRelayData[0] & REL_GEAR_IN_FORWARD) > 0);
 
+  rel_left_turn_signal = ((tinklaRelayData[1] & REL_LEFT_TURN_SIGNAL) > 0);
+  rel_right_turn_signal = ((tinklaRelayData[1] & REL_RIGHT_TURN_SIGNAL) > 0);
+  rel_brake_pressed = ((tinklaRelayData[1] & REL_BRAKE_PRESSED) > 0);
+  rel_highbeams_on = ((tinklaRelayData[1] & REL_HIGHBEAMS_ON) > 0);
+  rel_light_on = ((tinklaRelayData[1] & REL_LIGHT_ON) > 0);
+  rel_below_20mph = ((tinklaRelayData[1] & REL_BELOW_20MPH) > 0); 
 
-void TinklaRelay::processDataMessage(String dataMessage) {
-  int d1 = dataMessage.charAt(4);
-  int d2 = dataMessage.charAt(5);
-  int d3 = dataMessage.charAt(6);
-
-  #ifdef DEBUG
-  showDebugTxt("Got DAT");
-  #endif
-
-  rel_option1_on = ((d1 & REL_OPTION1_ON) > 0);
-  rel_option2_on = ((d1 & REL_OPTION2_ON) > 0);
-  rel_option3_on = ((d1 & REL_OPTION3_ON) > 0);
-  rel_option4_on = ((d1 & REL_OPTION4_ON) > 0);
-  rel_car_on = ((d1 & REL_CAR_ON) > 0);
-  rel_gear_in_reverse = ((d1 & REL_GEAR_IN_REVERSE) > 0);
-  rel_gear_in_forward = ((d1 & REL_GEAR_IN_FORWARD) > 0);
-
-  rel_left_turn_signal = ((d2 & REL_LEFT_TURN_SIGNAL) > 0);
-  rel_right_turn_signal = ((d2 & REL_RIGHT_TURN_SIGNAL) > 0);
-  rel_brake_pressed = ((d2 & REL_BRAKE_PRESSED) > 0);
-  rel_highbeams_on = ((d2 & REL_HIGHBEAMS_ON) > 0);
-  rel_light_on = ((d2 & REL_LIGHT_ON) > 0);
-  rel_below_20mph = ((d2 & REL_BELOW_20MPH) > 0); 
-
-  rel_left_steering_above_45deg = ((d3 & REL_LEFT_STEERING_ANGLE_ABOVE_45DEG) > 0); 
-  rel_right_steering_above_45deg = ((d3 & REL_RIGHT_STEERING_ANGLE_ABOVE_45DEG) > 0);
-  rel_AP_on = ((d3 & REL_AP_ON) > 0);
-  rel_car_charging = ((d3 & REL_CAR_CHARGING) > 0);
-  rel_left_side_bsm = ((d3 & REL_LEFT_SIDE_BSM) > 0);
-  rel_right_side_bsm = ((d3 & REL_RIGHT_SIDE_BSM) > 0);
-  rel_tacc_only_active = ((d3 & REL_TACC_ONLY_ACTIVE) > 0);
-}
-
-void TinklaRelay::processBrightnessMessage(String dataMessage) {
-  int d1 = dataMessage.charAt(4);
-  #ifdef DEBUG
-  showDebugTxt("Got BRT");
-  #endif
-  //brightness comes as % (0-128%) and gets 100 added to it so 35% is 135
-  if (d1 > 100) {
-    rel_brightness = d1 - 100;
-  }
+  rel_left_steering_above_45deg = ((tinklaRelayData[2] & REL_LEFT_STEERING_ANGLE_ABOVE_45DEG) > 0); 
+  rel_right_steering_above_45deg = ((tinklaRelayData[2] & REL_RIGHT_STEERING_ANGLE_ABOVE_45DEG) > 0);
+  rel_AP_on = ((tinklaRelayData[2] & REL_AP_ON) > 0);
+  rel_car_charging = ((tinklaRelayData[2] & REL_CAR_CHARGING) > 0);
+  rel_left_side_bsm = ((tinklaRelayData[2] & REL_LEFT_SIDE_BSM) > 0);
+  rel_right_side_bsm = ((tinklaRelayData[2] & REL_RIGHT_SIDE_BSM) > 0);
+  rel_tacc_only_active = ((tinklaRelayData[2] & REL_TACC_ONLY_ACTIVE) > 0);
+  rel_brightness = tinklaRelayData[3];
+  rel_speed = tinklaRelayData[4];
+  rel_power_lvl = (int16_t)((tinklaRelayData[5] << 8) | tinklaRelayData[6]);
 }

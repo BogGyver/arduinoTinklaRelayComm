@@ -1,4 +1,4 @@
-//#define SERIAL_DEBUG
+#define SERIAL_DEBUG
 #define LCD_DEBUG
 
 #include "TinklaRelayUsbHost.h"
