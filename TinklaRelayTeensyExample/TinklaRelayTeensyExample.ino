@@ -7,9 +7,9 @@
 void setup() {
   tinklaRelayusbHostSetup();
   //YOUR CODE STARTS HERE
+  Serial.begin(9600);
   speedometerSetup();
   neoPixelSetup();
-
   //YOUR CODE ENDS HERE
 }
 

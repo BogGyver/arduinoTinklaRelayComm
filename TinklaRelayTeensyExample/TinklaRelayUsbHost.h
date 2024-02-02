@@ -1,6 +1,3 @@
-#ifdef SERIAL_DEBUG
-  #include "Debug.h"
-#endif
 
 //USB Host stuff
 
