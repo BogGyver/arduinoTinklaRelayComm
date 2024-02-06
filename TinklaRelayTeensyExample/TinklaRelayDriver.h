@@ -59,6 +59,7 @@ public:
     volatile uint8_t rel_brightness = 100; // start brightness value
     volatile uint8_t rel_speed = 0; //starting speed, speed is in the UoM set on car
     volatile int16_t rel_power_lvl = 0; 
+    bool tinklaRelayInitialized = false;
 protected:
     virtual void Task();
     virtual bool claim(Device_t *device, int type, const uint8_t *descriptors, uint32_t len);
@@ -89,7 +90,7 @@ private:
     volatile uint8_t  rxlen;
     volatile bool     do_polling;  
     setup_t setup;
-    bool tinklaRelayInitialized = false;
+    
 
     //COMM VARIABLES
     bool readingLine = false;

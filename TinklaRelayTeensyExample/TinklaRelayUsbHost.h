@@ -13,6 +13,7 @@ USBDriver *drivers[] = { &tinklaRelay};
 #define CNT_DEVICES (sizeof(drivers) / sizeof(drivers[0]))
 bool driver_active[CNT_DEVICES] = { false };
 
+
 void UpdateActiveDeviceInfo() {
   for (uint8_t i = 0; i < CNT_DEVICES; i++) {
     if (*drivers[i] != driver_active[i]) {

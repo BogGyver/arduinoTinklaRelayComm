@@ -28,7 +28,9 @@ uint32_t pixelColors[12];
 #define LED_OFF           strip.Color(10,10,10) 
 #define LED_WHITE         strip.Color(127, 127, 127)
 //this is just to be able to rotate them later if we want to
-const uint8_t posToPixelNo[] = {0,1,2,3,4,5,6,7,8,9,10,11};
+//positive clockwise, negative counter clockwise, allows one to rotate easily the design. #3 is at 9 o'clock, #0 is at 6 o'clock
+#define PIXEL_SHIFT -5
+const uint8_t posToPixelNo[] = {7,8,9,10,11,0,1,2,3,4,5,6};
 
 void neoPixelSetup() {
   strip.begin();
@@ -41,7 +43,7 @@ void neoPixelSetup() {
 }
 
 void setPixelColor(uint8_t pos, uint32_t pixelColor) {
-  pixelColors[posToPixelNo[pos]] = pixelColor;
+  pixelColors[(CONTROLLED_PIXELS + pos + PIXEL_SHIFT) % CONTROLLED_PIXELS] = pixelColor;
 }
 
 void neoPixelComputeValues() {
@@ -85,9 +87,21 @@ void neoPixelLoop() {
     neoPixelComputeValues();
     strip.setBrightness((uint8_t)(tinklaRelay.rel_brightness * MAX_BRIGHTNESS_PERCENTAGE / 100));
   } else {
-    strip.setBrightness(0);
-    strip.show();
-    return;
+    if (!tinklaRelay.tinklaRelayInitialized) {
+      for (uint8_t i=0; i< 12;i++ ) {
+        if (i % 2 == 0) {
+          setPixelColor(i, alternateON ? LED_OFF : AP_TOURQUISE );
+        } else {
+          setPixelColor(i, alternateON ? AP_TOURQUISE : LED_OFF);
+        }
+      }
+      setPixelColor(3, BSM_RED);
+      strip.setBrightness((uint8_t)(tinklaRelay.rel_brightness * MAX_BRIGHTNESS_PERCENTAGE / 100));
+    } else {
+      strip.setBrightness(0);
+      strip.show();
+      return;
+    }
   }
   for(uint16_t i=0; i<CONTROLLED_PIXELS; i++) {
     strip.setPixelColor(i, pixelColors[i]);
