@@ -27,9 +27,12 @@ uint32_t pixelColors[12];
 #define BSM_RED           strip.Color(255, 0, 0)
 #define LED_OFF           strip.Color(10,10,10) 
 #define LED_WHITE         strip.Color(127, 127, 127)
-//this is just to be able to rotate them later if we want to
+//this is just to be abl    //some adjustment from torque to power ratings for regen
+    if (rel_power_lvl < 0) {
+      rel_power_lvl = (int16_t)(rel_power_lvl * 3 / 4 ); //might need a different value
+    }e to rotate them later if we want to
 //positive clockwise, negative counter clockwise, allows one to rotate easily the design. #3 is at 9 o'clock, #0 is at 6 o'clock
-#define PIXEL_SHIFT -5
+#define PIXEL_SHIFT -6
 const uint8_t posToPixelNo[] = {7,8,9,10,11,0,1,2,3,4,5,6};
 
 void neoPixelSetup() {

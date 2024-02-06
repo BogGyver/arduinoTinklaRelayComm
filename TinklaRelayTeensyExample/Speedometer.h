@@ -41,6 +41,7 @@ void drawCentreString(const char *buf)
 void speedometerLoop() {
   if (tinklaRelay.tinklaRelayInitialized && (!tinklaRelay.rel_car_on)) {
     display.clearDisplay();
+    display.display();
     return;
   }
   String spd = String((int)(tinklaRelay.rel_speed));
