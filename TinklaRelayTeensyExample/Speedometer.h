@@ -1,6 +1,5 @@
 
-/* USING SH1106/SSD1306 128x64 OLEDD DISPLAY WITH TEENSY 4.0 FOR DEBUG - With U8g2 library 
- *  - uncomment LCD_DEBUG definition below to use the LCD screen
+/* USING SH1106/SSD1306 128x64 OLEDD DISPLAY WITH TEENSY
  *  GND ==> GND
  *  VCC ==> 5V
  *  CLK ==> 13
