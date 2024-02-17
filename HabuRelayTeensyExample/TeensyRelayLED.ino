@@ -8,12 +8,14 @@ int counter = 0;
 //****** begin led globals and functions ******//
 
 #include <OctoWS2811.h>
+#include <cmath> // For exp()
 
 #define RED    0xFF0000
 #define GREEN  0x00FF00
 #define BLUE   0x0000FF
 #define AQUA   0x00FFFF
 #define YELLOW 0xFFFF00
+#define PINK   0xFF00FF
 #define WHITE  0xFFFFFF
 #define BLACK  0x000000
 #define MAXIMUM_BRIGHTNESS  0.25
@@ -31,16 +33,18 @@ OctoWS2811 leds(max_led, display_memory, drawing_memory, config, num_pins, pin_l
 int edge_leds[max_led*6]; 			// RGBW needs 32 bytes, RGB needs only 24
 int center_leds[max_led*6]; 		// RGBW needs 32 bytes, RGB needs only 24
 
-int max_status = 1000;
+int max_status = 200;
 int four_step_status = max_status / 4;
 int twelve_step_status = max_status / 12;
 int tacc_status = 0;            // 0 = off, 1-... = animation, max_status = on
 int AP_status = 0;              // 0 = off, 1-... = animation, max_status = on
+int tacc_ready_status = 0;      // 0 = off, 1-... = animation, max_status = on
+int AP_ready_status = 0;        // 0 = off, 1-... = animation, max_status = on
 int left_bsm_status = 0;        // 0 = off, 1 = animation, 2 = on
 int right_bsm_status = 0;       // 0 = off, 1 = animation, 2 = on
 int charging_status = 0;        // 0 = off, 1-... = animation
-int left_signal_status = 0;     // 0 = off, 1 = animation
-int right_signal_status = 0;    // 0 = off, 1 = animation
+int left_signal_status = 0;     // 0 = off, 1 = on
+int right_signal_status = 0;    // 0 = off, 1 = on
 bool animation = false;
 
 int LED_AP_on(int AP_status) {
@@ -55,7 +59,7 @@ int LED_AP_on(int AP_status) {
     int j = (AP_status / four_step_status) + 3;
     for (int i=2; i < j; i++) {
       center_leds[i] = AQUA;
-      center_leds[leds.numPixels()-i-2] = AQUA;
+      center_leds[leds.numPixels()-i-1] = AQUA;
       animation = true;
     }
     return AP_status + 1;
@@ -65,7 +69,7 @@ int LED_AP_on(int AP_status) {
 int LED_tacc_on(int tacc_status) {
   if (tacc_status >= max_status) {
     for (int i=2; i < leds.numPixels()-2; i++) {
-      center_leds[i] = YELLOW;
+      center_leds[i] = GREEN;
       animation = false;
     }
     return max_status;
@@ -73,18 +77,56 @@ int LED_tacc_on(int tacc_status) {
   else {
     int j = (tacc_status / four_step_status) + 3;
     for (int i=2; i < j; i++) {
-      center_leds[i] = YELLOW;
-      center_leds[leds.numPixels()-i-2] = YELLOW;
+      center_leds[i] = GREEN;
+      center_leds[leds.numPixels()-i-1] = GREEN;
       animation = true;
     }
     return tacc_status + 1;
   }
 }
 
+int LED_AP_ready(int AP_ready_status) {
+  if (AP_ready_status >= max_status) {
+    for (int i=2; i < leds.numPixels()-2; i++) {
+      center_leds[i] = YELLOW;
+      animation = false;
+    }
+    return max_status;
+  }
+  else {
+    int j = (AP_ready_status / four_step_status) + 3;
+    for (int i=2; i < j; i++) {
+      center_leds[i] = YELLOW;
+      center_leds[leds.numPixels()-i-1] = YELLOW;
+      animation = true;
+    }
+    return AP_ready_status + 1;
+  }
+}
+
+int LED_tacc_ready(int tacc_ready_status) {
+  if (tacc_ready_status >= max_status) {
+    for (int i=2; i < leds.numPixels()-2; i++) {
+      center_leds[i] = YELLOW;
+      animation = false;
+    }
+    return max_status;
+  }
+  else {
+    int j = (tacc_ready_status / four_step_status) + 3;
+    for (int i=2; i < j; i++) {
+      center_leds[i] = YELLOW;
+      center_leds[leds.numPixels()-i-1] = YELLOW;
+      animation = true;
+    }
+    return tacc_ready_status + 1;
+  }
+}
+
 int LED_charging_on(int charging_status) {
   if (charging_status <= max_status) {
     int j = (charging_status / twelve_step_status);
-    center_leds[leds.numPixels() - j] = BLUE;
+    center_leds[leds.numPixels() - j] = AQUA;
   }
   else if (charging_status <= (max_status * 2)) {
     int j = (charging_status / twelve_step_status) - max_status;
@@ -140,6 +182,23 @@ void LED_left_signal_off() {
   edge_leds[max_led-2] = BLACK;
 }
 
+void LED_startup() {
+  for (int i=0; i < leds.numPixels()-1; i++) {
+    center_leds[i] = WHITE;
+    animation = true;
+  }
+}
+
+void LED_drive() {
+  center_leds[2] = BLUE;
+  center_leds[9] = BLUE;
+}
+
+void LED_reverse() {
+  center_leds[2] = PINK;
+  center_leds[9] = PINK;
+}
+
 void LED_show() {
   float my_brightness = set_brightness();
 
@@ -154,9 +213,9 @@ void LED_show() {
     }
     else {
       float temp_brightness = my_brightness;
-      //if (!animation) {
-      //  temp_brightness = my_brightness / 2;
-      //}
+      if (!animation) {
+        temp_brightness = my_brightness / 2;
+      }
       leds.setPixel(i, decrease_brightness(center_leds[i], temp_brightness));
     }
   }
@@ -164,12 +223,18 @@ void LED_show() {
 }
 
 float set_brightness() {
-  //int tinkla_bright = constrain(tinklaRelay.rel_brightness, 0, 100);
-  int tinkla_bright = 10;
+  int tinkla_bright = constrain(tinklaRelay.rel_brightness, 0, 100);
+  //int tinkla_bright = 10;     // for manual debugging
   float normalized_bright = tinkla_bright / 100.0;
-  float exponential_bright = pow(normalized_bright, 1.5);
-  float temp_bright = ((MAXIMUM_BRIGHTNESS-MINIMUM_BRIGHTNESS) * exponential_bright) + MINIMUM_BRIGHTNESS;
-  return constrain(temp_bright, MINIMUM_BRIGHTNESS, MAXIMUM_BRIGHTNESS);
+
+  //float curved_bright = pow(normalized_bright, 1.5);      // exponential brightness
+
+  float k = 10; // Adjust this value to control the steepness of the curve
+  float x = 0.5; // Midpoint of the sigmoid, assuming normalized_bright is in [0, 1]
+  float curved_bright = 1.0f / (1.0f + exp(-k * (normalized_bright - x)));    // S-curve brightness
+
+  float final_bright = ((MAXIMUM_BRIGHTNESS-MINIMUM_BRIGHTNESS) * curved_bright) + MINIMUM_BRIGHTNESS;
+  return constrain(final_bright, MINIMUM_BRIGHTNESS, MAXIMUM_BRIGHTNESS);
 }
 
 uint32_t decrease_brightness(uint32_t color, float factor) {
@@ -183,8 +248,6 @@ void LED_center_off() {
   for (int i=0; i < leds.numPixels(); i++) {
     center_leds[i] = BLACK;
   }
-  center_leds[2] = BLUE;
-  center_leds[9] = BLUE;
 }
 
 void LED_edge_off() {
@@ -220,6 +283,8 @@ void setup() {
   LED_center_off();
   LED_edge_off();
   LED_off();
+  LED_startup();
+  delay(1000);
   //leds.show();
   //YOUR CODE ENDS HERE ***************************************
 }
@@ -233,6 +298,10 @@ void loop() {
 
   //YOUR CODE STARTS HERE ***************************************
   // translating relay variables to my led code variables
+
+  // insert AP_ready_status and tacc_ready_status code here 
+  // insert drive and reverse too
+
   if (tinklaRelay.rel_AP_on) {
     if (AP_status == 0) {
       AP_status = 1;
@@ -317,12 +386,21 @@ void loop() {
   else if (tacc_status > 0) {
     tacc_status = LED_tacc_on(tacc_status);
   }
+  else if (AP_ready_status > 0) {
+    AP_ready_status = LED_AP_ready(AP_ready_status);
+  }
+  else if (tacc_ready_status > 0) {
+    tacc_ready_status = LED_tacc_ready(tacc_ready_status);
+  }
+
+  // insert drive and reverse code here
+
   else if (charging_status > 0) {
     charging_status = LED_charging_on(charging_status);
   }
   else {
     LED_center_off();
-    //LED_debug_brightness();
+    //LED_debug_brightness();   // for debugging
   }
 
   if (right_bsm_status > 0) {
@@ -352,7 +430,7 @@ void loop() {
   }
 
   LED_show();
-  //delay(100);     // disabling this because relay library seems to have delay already
+  delay(5);     // for animation timing
 
   //YOUR CODE ENDS HERE ***************************************
 }
